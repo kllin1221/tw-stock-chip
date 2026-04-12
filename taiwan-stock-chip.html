@@ -711,30 +711,57 @@ function clearSelection() {
 // ═══════════════════════════════════════════════════════
 //  Build / Rebuild Chart
 // ═══════════════════════════════════════════════════════
+function barColors() {
+  return allData.map(d => d.close >= d.open ? 'rgba(239,68,68,.45)' : 'rgba(34,197,94,.45)');
+}
+
 function buildChart() {
   const canvas = document.getElementById('mainChart');
+  const containerH = canvas.parentElement?.clientHeight ?? 0;
+  if (containerH < 10) {
+    // Container not ready — skip and let the resize rAF trigger a proper render
+    console.warn('buildChart: container height is', containerH, '— deferring');
+    return;
+  }
+
   mainChart?.destroy();
+  mainChart = null;
+
+  const maxVol = Math.max(...allData.map(d => d.volume)) || 1;
 
   mainChart = new Chart(canvas.getContext('2d'), {
     type: 'line',
     data: {
       // Numeric index labels → precise pixel mapping via linear scale
       labels: allData.map((_, i) => i),
-      datasets: [{
-        label: '收盤價',
-        data: allData.map(d => d.close),
-        borderColor: '#6366f1',
-        backgroundColor: 'rgba(99,102,241,.07)',
-        borderWidth: 2,
-        pointRadius: 0,
-        pointHoverRadius: 4,
-        tension: 0.3,
-        fill: true,
-      }]
+      datasets: [
+        {
+          label: '收盤價',
+          data: allData.map(d => d.close),
+          borderColor: '#6366f1',
+          backgroundColor: 'rgba(99,102,241,.07)',
+          borderWidth: 2,
+          pointRadius: 0,
+          pointHoverRadius: 4,
+          tension: 0.3,
+          fill: true,
+          yAxisID: 'y',
+          order: 1,
+        },
+        {
+          label: '成交量',
+          type: 'bar',
+          data: allData.map(d => d.volume),
+          backgroundColor: barColors(),
+          borderWidth: 0,
+          yAxisID: 'yVol',
+          order: 2,
+        }
+      ]
     },
     options: {
-      responsive: true,            // Chart.js manages canvas size
-      maintainAspectRatio: false,  // fills container height
+      responsive: true,
+      maintainAspectRatio: false,
       animation: { duration: 300 },
       layout: { padding: { right: VP_WIDTH, top: 18 } },
       interaction: { mode: 'index', intersect: false },
@@ -743,7 +770,9 @@ function buildChart() {
         tooltip: {
           callbacks: {
             title: ctx => allData[ctx[0].dataIndex]?.date || '',
-            label: ctx => ` 收盤 $${ctx.parsed.y.toFixed(1)}`,
+            label: ctx => ctx.dataset.label === '成交量'
+              ? ` 成交量 ${ctx.parsed.y.toLocaleString()} 張`
+              : ` 收盤 $${ctx.parsed.y.toFixed(1)}`,
           },
           backgroundColor: '#1a1d27', borderColor: '#2e3251', borderWidth: 1,
           titleColor: '#e2e8f0', bodyColor: '#8892a4', padding: 8,
@@ -765,13 +794,21 @@ function buildChart() {
           position: 'left',
           grid: { color: 'rgba(46,50,81,.4)' },
           ticks: { color: '#8892a4', font: { size: 10 } },
+        },
+        yVol: {
+          display: false,   // no axis space — bars still render via the scale
+          min: 0,
+          max: maxVol * 5,  // bars occupy bottom ~20% of chart
         }
       }
     },
     plugins: [overlayPlugin]
   });
 
-  attachMouseEvents(canvas);
+  if (!canvas._chipMouseAttached) {
+    attachMouseEvents(canvas);
+    canvas._chipMouseAttached = true;
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -815,9 +852,17 @@ async function runAnalysis() {
     pill.textContent=currentSrc==='mock'?'MOCK':currentSrc==='finmind'?'FINMIND':'TWSE';
     pill.className=`src-pill ${currentSrc}`;
 
-    // Build chart after layout is painted (ensures container has real dimensions)
-    await new Promise(r => setTimeout(r, 50));
+    // Wait for layout to fully settle (config bar may shift heights)
+    await new Promise(r => setTimeout(r, 0));
+    await new Promise(r => requestAnimationFrame(r));
+    await new Promise(r => requestAnimationFrame(r));
     buildChart();
+    // If container wasn't ready yet, retry after next paint
+    if (!mainChart) {
+      await new Promise(r => requestAnimationFrame(r));
+      buildChart();
+    }
+    requestAnimationFrame(() => mainChart?.resize());
 
     // Compute full-range VP and draw overlays
     recalcVP();
