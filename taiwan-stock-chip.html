@@ -522,7 +522,7 @@ function drawVP(c) {
   if (!chartArea) return;
   const yScale  = scales.y;
   const cssW    = VP_WIDTH;
-  const cssH    = mainChart.canvas.clientHeight;
+  const cssH    = (mainChart ?? c).canvas.clientHeight;
   const dpr     = setCanvasSize(vpCanvas, cssW, cssH);
   const ctx     = vpCanvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
