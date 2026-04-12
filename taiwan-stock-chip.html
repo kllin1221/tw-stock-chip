@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>台股籌碼分布分析</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface2: #222537; --border: #2e3251;
+      --text: #e2e8f0; --muted: #8892a4;
+      --green: #22c55e; --red: #ef4444; --yellow: #eab308;
+      --blue: #3b82f6; --purple: #a855f7; --accent: #6366f1;
+    }
+    html, body { height: 100%; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', system-ui, sans-serif; font-size: 14px; overflow: hidden; display: flex; flex-direction: column; }
+
+    /* ── Header ── */
+    header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 9px 18px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    }
+    .logo { font-size: 16px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+    .logo span { color: var(--muted); font-weight: 400; font-size: 12px; margin-left: 5px; }
+    .controls { display: flex; gap: 9px; align-items: center; flex-wrap: wrap; flex: 1; }
+    .field { display: flex; align-items: center; gap: 5px; }
+    .field label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    input[type="text"], select {
+      background: var(--surface2); border: 1px solid var(--border); color: var(--text);
+      padding: 5px 9px; border-radius: 6px; font-size: 13px; outline: none;
+    }
+    input[type="text"]:focus, select:focus { border-color: var(--accent); }
+    input[type="text"] { width: 76px; }
+    input.wide { width: 160px; }
+    .src-tabs { display: flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+    .src-tab {
+      padding: 4px 11px; font-size: 12px; cursor: pointer; background: var(--surface2);
+      color: var(--muted); border: none; transition: all .15s; white-space: nowrap;
+    }
+    .src-tab:not(:last-child) { border-right: 1px solid var(--border); }
+    .src-tab.active { background: var(--accent); color: #fff; font-weight: 600; }
+    .query-btn {
+      background: var(--accent); color: #fff; border: none; padding: 6px 16px;
+      border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;
+    }
+    .query-btn:hover { opacity: .85; } .query-btn:disabled { opacity: .4; cursor: default; }
+    .stock-info { margin-left: auto; text-align: right; }
+    .stock-name { font-size: 13px; font-weight: 600; }
+    .stock-price { font-size: 20px; font-weight: 700; }
+    .stock-change { font-size: 12px; }
+    .up { color: var(--red); } .down { color: var(--green); }
+
+    /* ── Source config ── */
+    #srcConfig {
+      background: var(--surface2); border-bottom: 1px solid var(--border);
+      padding: 6px 18px; display: flex; align-items: center; gap: 10px;
+      font-size: 12px; color: var(--muted); flex-wrap: wrap;
+      flex-shrink: 0;   /* don't let this shrink the chart area */
+    }
+    #srcConfig.hidden { display: none; }
+    #srcConfig a { color: var(--accent); text-decoration: none; }
+
+    /* ── Layout ── */
+    .main {
+      display: grid;
+      grid-template-columns: 1fr 310px;
+      flex: 1;          /* fills remaining body height */
+      min-height: 0;    /* critical: allow flex child to shrink */
+      overflow: hidden;
+    }
+    .panel { background: var(--surface); border: 1px solid var(--border); overflow: hidden; }
+
+    /* Left: main chart panel */
+    .panel-chart { display: flex; flex-direction: column; border-right: 0; min-height: 0; }
+    .chart-topbar {
+      padding: 8px 14px; border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      font-size: 12px; flex-shrink: 0;
+    }
+    .chart-topbar-left { display: flex; align-items: center; gap: 10px; }
+    .chart-topbar-right { display: flex; align-items: center; gap: 8px; }
+    .chart-title { font-weight: 600; color: var(--muted); letter-spacing: .4px; text-transform: uppercase; }
+    .range-badge {
+      background: var(--surface2); border: 1px solid var(--accent);
+      color: var(--accent); padding: 2px 9px; border-radius: 12px; font-size: 11px; font-weight: 600;
+    }
+    .range-badge.full { border-color: var(--border); color: var(--muted); }
+    .hint { font-size: 11px; color: var(--muted); opacity: .7; }
+    .clear-btn {
+      font-size: 11px; color: var(--muted); background: var(--surface2);
+      border: 1px solid var(--border); padding: 2px 8px; border-radius: 10px; cursor: pointer;
+      display: none;
+    }
+    .clear-btn.show { display: inline-block; }
+    .clear-btn:hover { color: var(--red); border-color: var(--red); }
+
+    .chart-canvas-wrap { flex: 1; position: relative; min-height: 0; overflow: hidden; }
+    /* Let Chart.js responsive mode manage canvas size — do NOT set position:absolute */
+    .chart-canvas-wrap canvas { display: block; }
+
+    .legend-strip {
+      padding: 5px 14px; border-top: 1px solid var(--border);
+      display: flex; gap: 14px; font-size: 11px; color: var(--muted); flex-shrink: 0;
+    }
+    .dot { width: 9px; height: 9px; border-radius: 2px; display: inline-block; margin-right: 4px; vertical-align: middle; }
+
+    /* Right: info cards */
+    .panel-cards { border-left: 1px solid var(--border); display: flex; flex-direction: column; }
+    .panel-header {
+      padding: 8px 14px; border-bottom: 1px solid var(--border);
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      letter-spacing: .4px; text-transform: uppercase; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .src-pill { font-size: 10px; padding: 2px 7px; border-radius: 10px; border: 1px solid; font-weight: 600; }
+    .src-pill.mock    { border-color: var(--muted); color: var(--muted); }
+    .src-pill.finmind { border-color: var(--blue); color: var(--blue); }
+    .src-pill.twse    { border-color: var(--green); color: var(--green); }
+
+    .cards-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--border); flex: 1; }
+    .card { background: var(--surface); padding: 14px 13px; display: flex; flex-direction: column; justify-content: center; }
+    .card-label { font-size: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: .4px; margin-bottom: 4px; }
+    .card-value { font-size: 22px; font-weight: 700; }
+    .card-sub { font-size: 10px; color: var(--muted); margin-top: 3px; }
+    .card-value.green { color: var(--green); } .card-value.red { color: var(--red); }
+    .card-value.yellow { color: var(--yellow); } .card-value.blue { color: var(--blue); }
+    .card-value.purple { color: var(--purple); }
+    .prog-wrap { margin-top: 8px; }
+    .prog-track { height: 5px; background: var(--surface2); border-radius: 3px; overflow: hidden; }
+    .prog-green { height: 100%; background: var(--green); border-radius: 3px; transition: width .4s; }
+    .prog-red   { height: 100%; background: var(--red);   border-radius: 3px; transition: width .4s; }
+
+    /* Loading / Toast */
+    #loading {
+      position: fixed; inset: 0; background: rgba(15,17,23,.75);
+      display: flex; align-items: center; justify-content: center; z-index: 100; font-size: 13px; color: var(--muted);
+    }
+    #loading.hidden { display: none; }
+    .spinner { width: 26px; height: 26px; border: 3px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite; margin-right: 10px; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    #toast {
+      position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%);
+      background: #1e1b2e; border: 1px solid var(--red); color: var(--red);
+      padding: 9px 18px; border-radius: 8px; font-size: 12px; z-index: 200;
+      display: none; max-width: 480px; text-align: center;
+    }
+    #toast.show { display: block; } #toast.info { border-color: var(--accent); color: var(--accent); }
+  </style>
+</head>
+<body>
+
+<div id="loading"><div class="spinner"></div><span id="loadText">載入中…</span></div>
+<div id="toast"></div>
+
+<!-- ── Header ── -->
+<header>
+  <div class="logo">籌碼雷達 <span>台股個股分析</span></div>
+  <div class="controls">
+    <div class="field"><label>代號</label>
+      <input type="text" id="stockId" value="2330" maxlength="6" /></div>
+    <div class="field"><label>載入天數</label>
+      <select id="days">
+        <option value="40">40 日</option>
+        <option value="60" selected>60 日</option>
+        <option value="120">120 日</option>
+        <option value="240">240 日</option>
+      </select></div>
+    <div class="field"><label>分級</label>
+      <select id="buckets">
+        <option value="15">15 格</option>
+        <option value="20" selected>20 格</option>
+        <option value="30">30 格</option>
+        <option value="40">40 格</option>
+      </select></div>
+    <div class="field"><label>資料</label>
+      <div class="src-tabs">
+        <button class="src-tab active" data-src="mock"    onclick="setSrc('mock')">Mock</button>
+        <button class="src-tab"        data-src="finmind" onclick="setSrc('finmind')">FinMind</button>
+        <button class="src-tab"        data-src="twse"    onclick="setSrc('twse')">TWSE 代理</button>
+      </div></div>
+    <button class="query-btn" id="queryBtn" onclick="runAnalysis()">分析</button>
+  </div>
+  <div class="stock-info">
+    <div class="stock-name" id="stockName">—</div>
+    <div class="stock-price" id="stockPrice">—</div>
+    <div class="stock-change" id="stockChange">—</div>
+  </div>
+</header>
+
+<!-- ── Source Config Row ── -->
+<div id="srcConfig" class="hidden"></div>
+
+<!-- ── Main ── -->
+<div class="main" id="mainGrid">
+
+  <!-- Left: Combined chart -->
+  <div class="panel panel-chart">
+    <div class="chart-topbar">
+      <div class="chart-topbar-left">
+        <span class="chart-title">收盤走勢 &amp; 籌碼分布</span>
+        <span class="range-badge full" id="rangeBadge">全部區間</span>
+        <button class="clear-btn" id="clearBtn" onclick="clearSelection()">✕ 清除選取</button>
+      </div>
+      <div class="chart-topbar-right">
+        <span class="hint">← 拖曳走勢選取計算區間</span>
+      </div>
+    </div>
+    <div class="chart-canvas-wrap">
+      <canvas id="mainChart"></canvas>
+      <!-- Overlay: selection range (full-size, pointer-events:none) -->
+      <canvas id="selCanvas"  style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;"></canvas>
+      <!-- Overlay: volume profile strip (right VP_WIDTH px, pointer-events:none) -->
+      <canvas id="vpCanvas"   style="position:absolute;top:0;right:0;pointer-events:none;"></canvas>
+    </div>
+    <div class="legend-strip">
+      <span><span class="dot" style="background:#6366f1"></span>收盤走勢</span>
+      <span><span class="dot" style="background:#22c55e"></span>獲利籌碼</span>
+      <span><span class="dot" style="background:#ef4444"></span>套牢籌碼</span>
+      <span><span class="dot" style="background:#eab308"></span>POC 最大量價</span>
+      <span><span class="dot" style="background:#6366f1;opacity:.3"></span>價值區（VA 70%）</span>
+      <span style="margin-left:auto" class="hint">Volume Profile →</span>
+    </div>
+  </div>
+
+  <!-- Right: Info cards -->
+  <div class="panel panel-cards">
+    <div class="panel-header">
+      籌碼指標
+      <span class="src-pill mock" id="srcPill">MOCK</span>
+    </div>
+    <div class="cards-grid">
+      <div class="card">
+        <div class="card-label">POC 主力成本</div>
+        <div class="card-value yellow" id="poc">—</div>
+        <div class="card-sub">成交量最大價位</div>
+      </div>
+      <div class="card">
+        <div class="card-label">籌碼集中度</div>
+        <div class="card-value blue" id="concentration">—</div>
+        <div class="card-sub">前三大區間佔比</div>
+      </div>
+      <div class="card">
+        <div class="card-label">獲利籌碼</div>
+        <div class="card-value green" id="profitPct">—</div>
+        <div class="card-sub">現價以下持倉</div>
+        <div class="prog-wrap"><div class="prog-track"><div class="prog-green" id="profitBar" style="width:0%"></div></div></div>
+      </div>
+      <div class="card">
+        <div class="card-label">套牢籌碼</div>
+        <div class="card-value red" id="trapPct">—</div>
+        <div class="card-sub">現價以上持倉</div>
+        <div class="prog-wrap"><div class="prog-track"><div class="prog-red" id="trapBar" style="width:0%"></div></div></div>
+      </div>
+      <div class="card">
+        <div class="card-label">價值區上緣 VAH</div>
+        <div class="card-value purple" id="vah">—</div>
+        <div class="card-sub">70% 成交量上界</div>
+      </div>
+      <div class="card">
+        <div class="card-label">價值區下緣 VAL</div>
+        <div class="card-value purple" id="val">—</div>
+        <div class="card-sub">70% 成交量下界</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  Config & State
+// ═══════════════════════════════════════════════════════
+const LOCAL_PROXY = 'http://localhost:3000';
+const VP_WIDTH    = 190;   // pixels reserved on right for volume profile
+const VA_PCT      = 0.70;
+
+let currentSrc  = 'mock';
+let allData     = [];      // full loaded dataset
+let selStart    = null;    // index into allData (or null = no selection)
+let selEnd      = null;
+let isDragging  = false;
+let dragStartIdx = null;
+let mainChart   = null;
+
+// Computed VP state (recalculated on each selection change)
+let vpBuckets = [], pocIdx = 0, vaLo = 0, vaHi = 0;
+let currentClose = 0, totalVol = 0;
+
+// ═══════════════════════════════════════════════════════
+//  Source Switcher
+// ═══════════════════════════════════════════════════════
+function setSrc(src) {
+  currentSrc = src;
+  document.querySelectorAll('.src-tab').forEach(t => t.classList.toggle('active', t.dataset.src === src));
+  const cfg = document.getElementById('srcConfig');
+  if (src === 'mock') { cfg.className = 'hidden'; cfg.innerHTML = ''; }
+  else if (src === 'finmind') {
+    cfg.className = '';
+    cfg.innerHTML = `<span>🌐 <b>FinMind API</b> — 免費無需帳號，每日限額約 600 次。</span>
+      <span>選填 Token：</span>
+      <input type="text" id="finmindToken" class="wide" placeholder="貼上 FinMind Token 可提高限額" />
+      <a href="https://finmindtrade.com" target="_blank">申請帳號 →</a>`;
+  } else {
+    cfg.className = '';
+    cfg.innerHTML = `<span>🖥️ <b>TWSE 代理</b> — 需先啟動本地 <code>server.js</code>：</span>
+      <code style="background:#111;padding:2px 8px;border-radius:4px;font-size:11px">node server.js</code>
+      <input type="text" id="proxyUrl" class="wide" value="http://localhost:3000" />`;
+  }
+  // Chart.js responsive mode auto-resizes when container changes — just trigger resize
+  mainChart?.resize();
+}
+
+// ═══════════════════════════════════════════════════════
+//  Mock Data
+// ═══════════════════════════════════════════════════════
+const STOCK_NAMES = {
+  '2330':'台積電','2317':'鴻海','2454':'聯發科','2308':'台達電',
+  '2412':'中華電','2303':'聯電','2882':'國泰金','2891':'中信金',
+  '2886':'兆豐金','2002':'中鋼','1301':'台塑','2382':'廣達',
+  '0050':'元大台灣50','0056':'元大高股息',
+};
+const MOCK_META = {
+  '2330':{p:960,v:18},'2317':{p:195,v:5},'2454':{p:1100,v:30},
+  '2308':{p:340,v:10},'2412':{p:122,v:2},'0050':{p:188,v:4},
+};
+
+function generateMockData(symbol, tradingDays) {
+  const m = MOCK_META[symbol] || { p:500, v:15 };
+  let seed = symbol.split('').reduce((a,c) => a + c.charCodeAt(0), 0);
+  const rand = () => { seed = (seed*1664525+1013904223)&0xffffffff; return (seed>>>0)/0xffffffff; };
+  let price = m.p;
+  const data = [], today = new Date('2026-04-11');
+  let collected=0, offset=0;
+  while (collected < tradingDays) {
+    const d = new Date(today); d.setDate(d.getDate()-offset++);
+    if (d.getDay()===0||d.getDay()===6) continue;
+    const change = (rand()-.48)*m.v;
+    const close  = parseFloat(Math.max(m.p*.6,Math.min(m.p*1.5,price+change)).toFixed(1));
+    const open   = parseFloat((price+(rand()-.5)*m.v*.4).toFixed(1));
+    const high   = parseFloat((Math.max(open,close)+rand()*m.v*.3).toFixed(1));
+    const low    = parseFloat((Math.min(open,close)-rand()*m.v*.3).toFixed(1));
+    const volume = Math.floor(15000+rand()*50000);
+    data.unshift({ date:d.toISOString().split('T')[0], open, high, low, close, volume });
+    price=close; collected++;
+  }
+  return { name: STOCK_NAMES[symbol]||symbol, data };
+}
+
+// ═══════════════════════════════════════════════════════
+//  Real Data Fetchers
+// ═══════════════════════════════════════════════════════
+async function fetchFinMind(symbol, days) {
+  const token = (document.getElementById('finmindToken')?.value||'').trim();
+  const end=new Date('2026-04-11'), start=new Date(end);
+  start.setDate(start.getDate()-Math.ceil(days*1.8));
+  let url=`https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPrice&data_id=${symbol}&start_date=${start.toISOString().split('T')[0]}&end_date=${end.toISOString().split('T')[0]}`;
+  if (token) url+=`&token=${encodeURIComponent(token)}`;
+  const res=await fetch(url); if(!res.ok) throw new Error(`FinMind HTTP ${res.status}`);
+  const json=await res.json();
+  if(json.status!==200) throw new Error(json.msg||'FinMind 回傳錯誤');
+  if(!json.data?.length) throw new Error(`查無 ${symbol} 資料`);
+  const raw=json.data.slice(-days);
+  const data=raw.map(d=>({ date:d.date, open:+d.open, high:+d.max, low:+d.min, close:+d.close, volume:Math.round(d.Trading_Volume/1000), avgPrice:(d.Trading_Money&&d.Trading_Volume)?+d.Trading_Money/+d.Trading_Volume:null }));
+  let name=STOCK_NAMES[symbol]||symbol;
+  try { const ir=await fetch(`https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockInfo&data_id=${symbol}`+(token?`&token=${encodeURIComponent(token)}`:'')); const ij=await ir.json(); if(ij.data?.[0]?.stock_name) name=ij.data[0].stock_name; } catch{}
+  return {name,data};
+}
+
+async function fetchTWSEProxy(symbol, days) {
+  const proxy=(document.getElementById('proxyUrl')?.value||LOCAL_PROXY).replace(/\/$/,'');
+  const res=await fetch(`${proxy}/api/stock?symbol=${encodeURIComponent(symbol)}&days=${days}`);
+  if(!res.ok) throw new Error(`代理 HTTP ${res.status}，請確認 server.js 已啟動`);
+  const json=await res.json();
+  if(json.error) throw new Error(json.error);
+  return { name:json.name||STOCK_NAMES[symbol]||symbol, data:json.data };
+}
+
+async function fetchData(symbol, days) {
+  if (currentSrc==='finmind') return fetchFinMind(symbol,days);
+  if (currentSrc==='twse')    return fetchTWSEProxy(symbol,days);
+  return generateMockData(symbol,days);
+}
+
+// ═══════════════════════════════════════════════════════
+//  Volume Profile Calc
+// ═══════════════════════════════════════════════════════
+function calcVP(data, numBuckets) {
+  if (!data.length) return [];
+  const minP=Math.min(...data.map(d=>d.low));
+  const maxP=Math.max(...data.map(d=>d.high));
+  const bsz=(maxP-minP)/numBuckets;
+  const buckets=Array.from({length:numBuckets},(_,i)=>({
+    from:minP+i*bsz, to:minP+(i+1)*bsz, center:minP+(i+.5)*bsz, volume:0
+  }));
+  data.forEach(day=>{
+    const range=day.high-day.low||1;
+    const apex=day.avgPrice!=null?Math.min(Math.max(day.avgPrice,day.low),day.high):null;
+    buckets.forEach(b=>{
+      const ol=Math.max(day.low,b.from), oh=Math.min(day.high,b.to);
+      if(oh<=ol) return;
+      let weight;
+      if(apex==null){
+        // uniform fallback (no avgPrice)
+        weight=(oh-ol)/range;
+      } else {
+        // triangular distribution: peak at apex, zero at low and high
+        // CDF of triangular: integrate piecewise linear PDF over [ol,oh]
+        const L=day.low, H=day.high, M=apex;
+        const triCDF=x=>{
+          if(x<=L) return 0;
+          if(x>=H) return 1;
+          if(x<=M) return (x-L)**2/((H-L)*(M-L));
+          return 1-(H-x)**2/((H-L)*(H-M));
+        };
+        weight=triCDF(oh)-triCDF(ol);
+      }
+      b.volume+=day.volume*weight;
+    });
+  });
+  return buckets;
+}
+
+function calcVA(buckets) {
+  if (!buckets.length) return { pocIdx:0, vah:0, val:0, vaLo:0, vaHi:0 };
+  const total=buckets.reduce((s,b)=>s+b.volume,0);
+  const pocIdx=buckets.reduce((mi,b,i,arr)=>b.volume>arr[mi].volume?i:mi,0);
+  let lo=pocIdx, hi=pocIdx, sum=buckets[pocIdx].volume;
+  while(sum/total<VA_PCT) {
+    const up=hi+1<buckets.length?buckets[hi+1].volume:-1;
+    const dn=lo-1>=0?buckets[lo-1].volume:-1;
+    if(up>=dn&&up>=0){hi++;sum+=buckets[hi].volume;}
+    else if(dn>=0){lo--;sum+=buckets[lo].volume;}
+    else break;
+  }
+  return { pocIdx, vah:buckets[hi].to, val:buckets[lo].from, vaLo:lo, vaHi:hi };
+}
+
+// ═══════════════════════════════════════════════════════
+//  Recalc VP from current selection
+// ═══════════════════════════════════════════════════════
+function getActiveData() {
+  if (selStart===null || allData.length===0) return allData;
+  const s=Math.min(selStart,selEnd??selStart);
+  const e=Math.max(selStart,selEnd??selStart);
+  return allData.slice(s, e+1);
+}
+
+function recalcVP() {
+  const numBuckets=parseInt(document.getElementById('buckets').value);
+  const active=getActiveData();
+  vpBuckets=calcVP(active, numBuckets);
+  const va=calcVA(vpBuckets);
+  pocIdx=va.pocIdx; vaLo=va.vaLo; vaHi=va.vaHi;
+  totalVol=vpBuckets.reduce((s,b)=>s+b.volume,0);
+  currentClose=allData[allData.length-1].close;
+  updateCards(active);
+  updateRangeBadge(active);
+}
+
+function updateCards(active) {
+  if (!vpBuckets.length) return;
+  const cur=currentClose;
+  const profitVol=vpBuckets.filter(b=>b.center<cur).reduce((s,b)=>s+b.volume,0);
+  const trapVol  =vpBuckets.filter(b=>b.center>cur).reduce((s,b)=>s+b.volume,0);
+  const profitPct=(profitVol/totalVol*100).toFixed(1);
+  const trapPct  =(trapVol  /totalVol*100).toFixed(1);
+  const top3=([...vpBuckets].sort((a,b)=>b.volume-a.volume).slice(0,3).reduce((s,b)=>s+b.volume,0)/totalVol*100).toFixed(1);
+  const prec=cur>=100?0:1;
+  const va=calcVA(vpBuckets);
+  document.getElementById('poc').textContent          =`$${vpBuckets[pocIdx].center.toFixed(prec)}`;
+  document.getElementById('concentration').textContent=`${top3}%`;
+  document.getElementById('profitPct').textContent    =`${profitPct}%`;
+  document.getElementById('trapPct').textContent      =`${trapPct}%`;
+  document.getElementById('vah').textContent          =`$${va.vah.toFixed(prec)}`;
+  document.getElementById('val').textContent          =`$${va.val.toFixed(prec)}`;
+  document.getElementById('profitBar').style.width    =`${profitPct}%`;
+  document.getElementById('trapBar').style.width      =`${trapPct}%`;
+}
+
+function updateRangeBadge(active) {
+  const badge=document.getElementById('rangeBadge');
+  const clearBtn=document.getElementById('clearBtn');
+  if (!active.length) return;
+  if (selStart===null) {
+    badge.textContent=`全部 ${active.length} 日`;
+    badge.className='range-badge full';
+    clearBtn.classList.remove('show');
+  } else {
+    const s=active[0].date, e=active[active.length-1].date;
+    badge.textContent=`${s.slice(5)} → ${e.slice(5)} （${active.length} 日）`;
+    badge.className='range-badge';
+    clearBtn.classList.add('show');
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  Chart.js Plugins
+// ═══════════════════════════════════════════════════════
+
+// ═══════════════════════════════════════════════════════
+//  Overlay Canvas Helpers
+//  These draw directly on dedicated overlay canvases that sit
+//  above the Chart.js canvas, completely bypassing the plugin
+//  system and any clipping/transform Chart.js may leave active.
+// ═══════════════════════════════════════════════════════
+
+function setCanvasSize(canvas, cssW, cssH) {
+  const dpr = window.devicePixelRatio || 1;
+  canvas.width  = Math.round(cssW * dpr);
+  canvas.height = Math.round(cssH * dpr);
+  canvas.style.width  = cssW + 'px';
+  canvas.style.height = cssH + 'px';
+  return dpr;
+}
+
+/* Draw the Volume Profile strip on the dedicated vpCanvas overlay */
+function drawVP(c) {
+  const vpCanvas = document.getElementById('vpCanvas');
+  c = c || Chart.getChart(document.getElementById('mainChart'));
+  if (!c || !vpBuckets.length || !vpCanvas) return;
+  const { chartArea, scales } = c;
+  if (!chartArea) return;
+  const yScale  = scales.y;
+  const cssW    = VP_WIDTH;
+  const cssH    = mainChart.canvas.clientHeight;
+  const dpr     = setCanvasSize(vpCanvas, cssW, cssH);
+  const ctx     = vpCanvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  // Local coords: x=0 is the left edge of the VP strip (= chart.width - VP_WIDTH on main canvas)
+  const margin = 6;
+  const vpW    = cssW - margin * 2;
+
+  // Background
+  ctx.fillStyle = 'rgba(20,23,36,0.9)';
+  ctx.fillRect(0, chartArea.top, cssW, chartArea.bottom - chartArea.top);
+
+  // "VOL PROFILE" label (above chartArea)
+  ctx.fillStyle = '#555e7a';
+  ctx.font = '9px Segoe UI, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.fillText('VOL PROFILE', cssW / 2, Math.max(chartArea.top - 3, 10));
+
+  const maxVol = Math.max(...vpBuckets.map(b => b.volume));
+
+  vpBuckets.forEach((b, i) => {
+    const yTop = Math.min(yScale.getPixelForValue(b.to), yScale.getPixelForValue(b.from));
+    const yBot = Math.max(yScale.getPixelForValue(b.to), yScale.getPixelForValue(b.from));
+    const clippedTop = Math.max(yTop, chartArea.top);
+    const clippedBot = Math.min(yBot, chartArea.bottom);
+    if (clippedBot <= clippedTop) return;
+
+    const barW = (b.volume / maxVol) * vpW;
+    let color;
+    if (i === pocIdx)              color = '#eab308';
+    else if (i >= vaLo && i <= vaHi)
+      color = b.center >= currentClose ? 'rgba(239,68,68,.45)' : 'rgba(34,197,94,.45)';
+    else
+      color = b.center >= currentClose ? '#ef4444' : '#22c55e';
+
+    ctx.fillStyle = color;
+    ctx.fillRect(margin, clippedTop, barW, clippedBot - clippedTop);
+  });
+
+  // Current-price dashed line
+  if (currentClose > 0) {
+    const curY = yScale.getPixelForValue(currentClose);
+    if (curY >= chartArea.top && curY <= chartArea.bottom) {
+      ctx.beginPath();
+      ctx.moveTo(0, curY); ctx.lineTo(cssW, curY);
+      ctx.strokeStyle = 'rgba(255,255,255,0.55)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+  }
+}
+
+/* Draw the date-range selection overlay on selCanvas */
+function drawSel(c) {
+  const selCanvas = document.getElementById('selCanvas');
+  c = c || Chart.getChart(document.getElementById('mainChart'));
+  if (!c || !selCanvas) return;
+  const { chartArea } = c;
+  if (!chartArea) return;
+  const cssW = c.canvas.clientWidth;
+  const cssH = c.canvas.clientHeight;
+  const dpr  = setCanvasSize(selCanvas, cssW, cssH);
+  const ctx  = selCanvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, cssW, cssH);
+
+  if (selStart === null && !isDragging) return;
+  const n = allData.length;
+  if (n < 2) return;
+  const meta = c.getDatasetMeta(0);
+  if (!meta?.data?.length) return;
+
+  const s   = selStart !== null ? Math.min(selStart, selEnd ?? selStart) : 0;
+  const e   = selStart !== null ? Math.max(selStart, selEnd ?? selStart) : n - 1;
+  const pxS = meta.data[Math.max(0, Math.min(n - 1, s))].x;
+  const pxE = meta.data[Math.max(0, Math.min(n - 1, e))].x;
+
+  // Dim regions outside selection
+  ctx.fillStyle = 'rgba(15,17,23,.55)';
+  if (pxS > chartArea.left)
+    ctx.fillRect(chartArea.left, chartArea.top, pxS - chartArea.left, chartArea.bottom - chartArea.top);
+  if (pxE < chartArea.right)
+    ctx.fillRect(pxE, chartArea.top, chartArea.right - pxE, chartArea.bottom - chartArea.top);
+
+  // Boundary lines + triangle handles
+  ctx.strokeStyle = '#6366f1';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([]);
+  [pxS, pxE].forEach(px => {
+    ctx.beginPath(); ctx.moveTo(px, chartArea.top); ctx.lineTo(px, chartArea.bottom); ctx.stroke();
+    ctx.fillStyle = '#6366f1';
+    ctx.beginPath(); ctx.moveTo(px - 5, chartArea.top); ctx.lineTo(px + 5, chartArea.top); ctx.lineTo(px, chartArea.top + 9); ctx.closePath(); ctx.fill();
+  });
+
+  // Date labels inside chart area
+  ctx.font = 'bold 10px Segoe UI, sans-serif';
+  ctx.fillStyle = '#a5b4fc';
+  ctx.textAlign = 'center';
+  if (s < allData.length) ctx.fillText(allData[s].date.slice(5), pxS, chartArea.top + 20);
+  if (e < allData.length) ctx.fillText(allData[e].date.slice(5), pxE, chartArea.top + 20);
+}
+
+function drawOverlays() { drawVP(); drawSel(); }
+
+/* Thin Chart.js plugin — redraws overlays after every chart draw */
+const overlayPlugin = {
+  id: 'overlayPlugin',
+  afterDraw(chart) { drawVP(chart); drawSel(chart); }
+};
+
+// ═══════════════════════════════════════════════════════
+//  Mouse Interaction
+// ═══════════════════════════════════════════════════════
+function xPixelToIndex(px) {
+  if (!allData.length) return 0;
+  const c = Chart.getChart(document.getElementById('mainChart'));
+  if (!c) return 0;
+  const n = allData.length;
+  const meta = c.getDatasetMeta(0);
+  if (!meta?.data?.length) return 0;
+  const pxFirst = meta.data[0].x;
+  const pxLast  = meta.data[n - 1].x;
+  if (pxLast === pxFirst) return 0;
+  const ratio = (px - pxFirst) / (pxLast - pxFirst);
+  return Math.max(0, Math.min(n - 1, Math.round(ratio * (n - 1))));
+}
+
+function isInChartArea(px) {
+  const c = Chart.getChart(document.getElementById('mainChart'));
+  if (!c?.chartArea) return false;
+  const ca = c.chartArea;
+  const rightBoundary = Math.min(ca.right, c.width - VP_WIDTH);
+  return px >= ca.left && px <= rightBoundary;
+}
+
+function attachMouseEvents(canvas) {
+  let clickX = null;
+
+  canvas.addEventListener('mousedown', e => {
+    if (!isInChartArea(e.offsetX)) return;
+    isDragging  = true;
+    clickX      = e.offsetX;
+    dragStartIdx = xPixelToIndex(e.offsetX);
+    selStart     = dragStartIdx;
+    selEnd       = dragStartIdx;
+    canvas.style.cursor = 'crosshair';
+  });
+
+  canvas.addEventListener('mousemove', e => {
+    if (!isDragging) return;
+    selEnd = xPixelToIndex(e.offsetX);
+    drawSel(); // update overlay directly — no full chart redraw needed
+  });
+
+  canvas.addEventListener('mouseup', e => {
+    if (!isDragging) return;
+    isDragging = false;
+    canvas.style.cursor = 'default';
+    selEnd = xPixelToIndex(e.offsetX);
+    // Single click (no drag) = clear selection
+    if (Math.abs(e.offsetX - clickX) < 5) {
+      selStart = null; selEnd = null;
+    }
+    recalcVP();
+    drawOverlays();
+  });
+
+  canvas.addEventListener('mouseleave', () => {
+    if (isDragging) {
+      isDragging = false;
+      recalcVP();
+      drawOverlays();
+    }
+  });
+}
+
+function clearSelection() {
+  selStart = null; selEnd = null;
+  recalcVP();
+  drawOverlays();
+}
+
+// ═══════════════════════════════════════════════════════
+//  Build / Rebuild Chart
+// ═══════════════════════════════════════════════════════
+function buildChart() {
+  const canvas = document.getElementById('mainChart');
+  mainChart?.destroy();
+
+  mainChart = new Chart(canvas.getContext('2d'), {
+    type: 'line',
+    data: {
+      // Numeric index labels → precise pixel mapping via linear scale
+      labels: allData.map((_, i) => i),
+      datasets: [{
+        label: '收盤價',
+        data: allData.map(d => d.close),
+        borderColor: '#6366f1',
+        backgroundColor: 'rgba(99,102,241,.07)',
+        borderWidth: 2,
+        pointRadius: 0,
+        pointHoverRadius: 4,
+        tension: 0.3,
+        fill: true,
+      }]
+    },
+    options: {
+      responsive: true,            // Chart.js manages canvas size
+      maintainAspectRatio: false,  // fills container height
+      animation: { duration: 300 },
+      layout: { padding: { right: VP_WIDTH, top: 18 } },
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            title: ctx => allData[ctx[0].dataIndex]?.date || '',
+            label: ctx => ` 收盤 $${ctx.parsed.y.toFixed(1)}`,
+          },
+          backgroundColor: '#1a1d27', borderColor: '#2e3251', borderWidth: 1,
+          titleColor: '#e2e8f0', bodyColor: '#8892a4', padding: 8,
+          filter: () => !isDragging,
+        }
+      },
+      scales: {
+        x: {
+          type: 'linear',
+          min: 0,
+          max: allData.length - 1,
+          grid: { color: 'rgba(46,50,81,.4)' },
+          ticks: {
+            color: '#8892a4', font: { size: 10 }, maxTicksLimit: 10,
+            callback: v => allData[Math.round(v)]?.date.slice(5) || '',
+          },
+        },
+        y: {
+          position: 'left',
+          grid: { color: 'rgba(46,50,81,.4)' },
+          ticks: { color: '#8892a4', font: { size: 10 } },
+        }
+      }
+    },
+    plugins: [overlayPlugin]
+  });
+
+  attachMouseEvents(canvas);
+}
+
+// ═══════════════════════════════════════════════════════
+//  Toast
+// ═══════════════════════════════════════════════════════
+let toastTimer;
+function showToast(msg, info=false) {
+  const el=document.getElementById('toast');
+  el.textContent=msg; el.className=`show${info?' info':''}`;
+  clearTimeout(toastTimer); toastTimer=setTimeout(()=>el.className='',4000);
+}
+
+// ═══════════════════════════════════════════════════════
+//  Main Analysis
+// ═══════════════════════════════════════════════════════
+async function runAnalysis() {
+  const symbol = document.getElementById('stockId').value.trim()||'2330';
+  const days   = parseInt(document.getElementById('days').value);
+  document.getElementById('loadText').textContent =
+    currentSrc==='mock' ? '產生模擬資料…' : currentSrc==='finmind' ? 'FinMind API 拉取中…' : 'TWSE 代理拉取中…';
+  document.getElementById('loading').classList.remove('hidden');
+  document.getElementById('queryBtn').disabled = true;
+
+  try {
+    const { name, data } = await fetchData(symbol, days);
+    if (!data?.length || data.length < 5) throw new Error('資料不足（至少需 5 個交易日）');
+
+    allData = data;
+    selStart = null; selEnd = null;   // reset selection on new query
+
+    // Header info
+    const cur=allData[allData.length-1].close;
+    const prev=allData[allData.length-2]?.close??cur;
+    const chg=cur-prev; const isUp=chg>=0;
+    document.getElementById('stockName').textContent  =`${symbol} ${name}`;
+    document.getElementById('stockPrice').textContent =`$${cur.toFixed(1)}`;
+    document.getElementById('stockPrice').className   =`stock-price ${isUp?'up':'down'}`;
+    document.getElementById('stockChange').textContent=`${isUp?'▲':'▼'} ${Math.abs(chg).toFixed(1)} (${isUp?'+':''}${(chg/prev*100).toFixed(2)}%)`;
+    document.getElementById('stockChange').className  =`stock-change ${isUp?'up':'down'}`;
+    const pill=document.getElementById('srcPill');
+    pill.textContent=currentSrc==='mock'?'MOCK':currentSrc==='finmind'?'FINMIND':'TWSE';
+    pill.className=`src-pill ${currentSrc}`;
+
+    // Build chart after layout is painted (ensures container has real dimensions)
+    await new Promise(r => setTimeout(r, 50));
+    buildChart();
+
+    // Compute full-range VP and draw overlays
+    recalcVP();
+    drawOverlays();
+
+    if (currentSrc!=='mock') showToast(`✅ ${name} 已載入 ${data.length} 個交易日真實資料`, true);
+
+  } catch(err) {
+    console.error(err);
+    showToast(`❌ ${err.message}`);
+    if (currentSrc!=='mock') {
+      const prev=currentSrc; currentSrc='mock';
+      await runAnalysis(); currentSrc=prev;
+    }
+  } finally {
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('queryBtn').disabled=false;
+  }
+}
+
+// ── Init ──────────────────────────────────────────────
+document.getElementById('stockId').addEventListener('keydown', e => { if(e.key==='Enter') runAnalysis(); });
+document.getElementById('buckets').addEventListener('change', () => { if(allData.length){ recalcVP(); drawOverlays(); }});
+window.addEventListener('load', runAnalysis);
+</script>
+</body>
+</html>
