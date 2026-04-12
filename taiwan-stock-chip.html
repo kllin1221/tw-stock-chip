@@ -724,7 +724,8 @@ function buildChart() {
     return;
   }
 
-  mainChart?.destroy();
+  // Destroy via canvas registry to handle any mismatch between mainChart ref and actual registered chart
+  (Chart.getChart(canvas) || mainChart)?.destroy();
   mainChart = null;
 
   const maxVol = Math.max(...allData.map(d => d.volume)) || 1;
