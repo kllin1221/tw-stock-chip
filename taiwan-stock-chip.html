@@ -462,7 +462,8 @@ function recalcVP() {
   const active=getActiveData();
   const minP=Math.min(...active.map(d=>d.low));
   const maxP=Math.max(...active.map(d=>d.high));
-  const numBuckets=Math.max(50, Math.ceil((maxP-minP)/5));
+  const gradeSize=maxP<100?1:5;
+  const numBuckets=Math.max(50, Math.ceil((maxP-minP)/gradeSize));
   vpBuckets=calcVP(active, numBuckets);
   const va=calcVA(vpBuckets);
   pocIdx=va.pocIdx; vaLo=va.vaLo; vaHi=va.vaHi;
