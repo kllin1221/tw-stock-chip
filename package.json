@@ -1,0 +1,14 @@
+{
+  "name": "taiwan-stock-chip-radar",
+  "version": "1.0.0",
+  "description": "台股個股籌碼分布分析 — TWSE 本機代理伺服器",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=16"
+  },
+  "license": "MIT"
+}
