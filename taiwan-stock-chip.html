@@ -40,6 +40,13 @@
     }
     .src-tab:not(:last-child) { border-right: 1px solid var(--border); }
     .src-tab.active { background: var(--accent); color: #fff; font-weight: 600; }
+    .settings-btn {
+      background: var(--surface2); border: 1px solid var(--border); color: var(--muted);
+      padding: 5px 9px; border-radius: 6px; font-size: 14px; cursor: pointer; line-height: 1;
+      transition: all .15s;
+    }
+    .settings-btn:hover { border-color: var(--accent); color: var(--accent); }
+    .settings-btn.active { border-color: var(--accent); color: var(--accent); background: var(--surface); }
     .query-btn {
       background: var(--accent); color: #fff; border: none; padding: 6px 16px;
       border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;
@@ -51,14 +58,16 @@
     .stock-change { font-size: 12px; }
     .up { color: var(--red); } .down { color: var(--green); }
 
-    /* ── Source config ── */
-    #srcConfig {
+    /* ── Settings panel ── */
+    #settingsPanel {
       background: var(--surface2); border-bottom: 1px solid var(--border);
-      padding: 6px 18px; display: flex; align-items: center; gap: 10px;
-      font-size: 12px; color: var(--muted); flex-wrap: wrap;
-      flex-shrink: 0;   /* don't let this shrink the chart area */
+      padding: 8px 18px; display: flex; align-items: center; gap: 16px;
+      font-size: 12px; color: var(--muted); flex-wrap: wrap; flex-shrink: 0;
     }
-    #srcConfig.hidden { display: none; }
+    #settingsPanel.hidden { display: none; }
+    .settings-group { display: flex; align-items: center; gap: 8px; }
+    .settings-group-label { color: var(--muted); font-size: 12px; white-space: nowrap; }
+    #srcConfig { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
     #srcConfig a { color: var(--accent); text-decoration: none; }
 
     /* ── Layout ── */
@@ -166,20 +175,8 @@
         <option value="120">120 日</option>
         <option value="240">240 日</option>
       </select></div>
-    <div class="field"><label>分級</label>
-      <select id="buckets">
-        <option value="15">15 格</option>
-        <option value="20" selected>20 格</option>
-        <option value="30">30 格</option>
-        <option value="40">40 格</option>
-      </select></div>
-    <div class="field"><label>資料</label>
-      <div class="src-tabs">
-        <button class="src-tab active" data-src="mock"    onclick="setSrc('mock')">Mock</button>
-        <button class="src-tab"        data-src="finmind" onclick="setSrc('finmind')">FinMind</button>
-        <button class="src-tab"        data-src="twse"    onclick="setSrc('twse')">TWSE 代理</button>
-      </div></div>
     <button class="query-btn" id="queryBtn" onclick="runAnalysis()">分析</button>
+    <button class="settings-btn" id="settingsBtn" onclick="toggleSettings()" title="設定">⚙</button>
   </div>
   <div class="stock-info">
     <div class="stock-name" id="stockName">—</div>
@@ -188,8 +185,18 @@
   </div>
 </header>
 
-<!-- ── Source Config Row ── -->
-<div id="srcConfig" class="hidden"></div>
+<!-- ── Settings Panel ── -->
+<div id="settingsPanel" class="hidden">
+  <div class="settings-group">
+    <span class="settings-group-label">資料來源</span>
+    <div class="src-tabs">
+      <button class="src-tab"        data-src="mock"    onclick="setSrc('mock')">Mock</button>
+      <button class="src-tab active" data-src="finmind" onclick="setSrc('finmind')">FinMind</button>
+      <button class="src-tab"        data-src="twse"    onclick="setSrc('twse')">TWSE 代理</button>
+    </div>
+  </div>
+  <div id="srcConfig"></div>
+</div>
 
 <!-- ── Main ── -->
 <div class="main" id="mainGrid">
@@ -274,7 +281,7 @@ const LOCAL_PROXY = 'http://localhost:3000';
 const VP_WIDTH    = 190;   // pixels reserved on right for volume profile
 const VA_PCT      = 0.70;
 
-let currentSrc  = 'mock';
+let currentSrc  = 'finmind';
 let allData     = [];      // full loaded dataset
 let selStart    = null;    // index into allData (or null = no selection)
 let selEnd      = null;
@@ -293,20 +300,26 @@ function setSrc(src) {
   currentSrc = src;
   document.querySelectorAll('.src-tab').forEach(t => t.classList.toggle('active', t.dataset.src === src));
   const cfg = document.getElementById('srcConfig');
-  if (src === 'mock') { cfg.className = 'hidden'; cfg.innerHTML = ''; }
-  else if (src === 'finmind') {
-    cfg.className = '';
+  if (src === 'mock') {
+    cfg.innerHTML = '';
+  } else if (src === 'finmind') {
     cfg.innerHTML = `<span>🌐 <b>FinMind API</b> — 免費無需帳號，每日限額約 600 次。</span>
       <span>選填 Token：</span>
       <input type="text" id="finmindToken" class="wide" placeholder="貼上 FinMind Token 可提高限額" />
       <a href="https://finmindtrade.com" target="_blank">申請帳號 →</a>`;
   } else {
-    cfg.className = '';
     cfg.innerHTML = `<span>🖥️ <b>TWSE 代理</b> — 需先啟動本地 <code>server.js</code>：</span>
       <code style="background:#111;padding:2px 8px;border-radius:4px;font-size:11px">node server.js</code>
       <input type="text" id="proxyUrl" class="wide" value="http://localhost:3000" />`;
   }
-  // Chart.js responsive mode auto-resizes when container changes — just trigger resize
+  mainChart?.resize();
+}
+
+function toggleSettings() {
+  const panel = document.getElementById('settingsPanel');
+  const btn   = document.getElementById('settingsBtn');
+  const hidden = panel.classList.toggle('hidden');
+  btn.classList.toggle('active', !hidden);
   mainChart?.resize();
 }
 
@@ -446,8 +459,10 @@ function getActiveData() {
 }
 
 function recalcVP() {
-  const numBuckets=parseInt(document.getElementById('buckets').value);
   const active=getActiveData();
+  const minP=Math.min(...active.map(d=>d.low));
+  const maxP=Math.max(...active.map(d=>d.high));
+  const numBuckets=Math.max(50, Math.ceil((maxP-minP)/5));
   vpBuckets=calcVP(active, numBuckets);
   const va=calcVA(vpBuckets);
   pocIdx=va.pocIdx; vaLo=va.vaLo; vaHi=va.vaHi;
@@ -884,8 +899,8 @@ async function runAnalysis() {
 
 // ── Init ──────────────────────────────────────────────
 document.getElementById('stockId').addEventListener('keydown', e => { if(e.key==='Enter') runAnalysis(); });
-document.getElementById('buckets').addEventListener('change', () => { if(allData.length){ recalcVP(); drawOverlays(); }});
-window.addEventListener('load', runAnalysis);
+
+window.addEventListener('load', () => { setSrc('finmind'); runAnalysis(); });
 </script>
 </body>
 </html>
