@@ -342,7 +342,7 @@ function generateMockData(symbol, tradingDays) {
   let seed = symbol.split('').reduce((a,c) => a + c.charCodeAt(0), 0);
   const rand = () => { seed = (seed*1664525+1013904223)&0xffffffff; return (seed>>>0)/0xffffffff; };
   let price = m.p;
-  const data = [], today = new Date('2026-04-11');
+  const data = [], today = new Date();
   let collected=0, offset=0;
   while (collected < tradingDays) {
     const d = new Date(today); d.setDate(d.getDate()-offset++);
@@ -364,7 +364,7 @@ function generateMockData(symbol, tradingDays) {
 // ═══════════════════════════════════════════════════════
 async function fetchFinMind(symbol, days) {
   const token = (document.getElementById('finmindToken')?.value||'').trim();
-  const end=new Date('2026-04-11'), start=new Date(end);
+  const end=new Date(), start=new Date(end);
   start.setDate(start.getDate()-Math.ceil(days*1.8));
   let url=`https://api.finmindtrade.com/api/v4/data?dataset=TaiwanStockPrice&data_id=${symbol}&start_date=${start.toISOString().split('T')[0]}&end_date=${end.toISOString().split('T')[0]}`;
   if (token) url+=`&token=${encodeURIComponent(token)}`;
